@@ -1,0 +1,609 @@
+---
+title: "Air Quality Forecasting"
+fontsize: 20pt
+format:
+  revealjs: 
+    slide-level: 2
+  html:
+    includes:
+      in_header: styles.css
+editor: visual
+toc: true
+toc-depth: 1
+slide-number: true
+smaller: false
+scrollable: true 
+execute:
+  echo: true
+editor_options: 
+  chunk_output_type: console
+---
+
+## Introduction
+
+-   Essential for evaluating ecosystem health, as poor air quality affects wildlife, forests, and water bodies, impacting biodiversity.
+-   Identifying pollutants causing respiratory and cardiovascular diseases helps in improving public health.
+
+![](images/combined_pic.png){fig-align="center" width="517"}
+
+## Project Objective:
+
+-   To develop a forecasting model that accurately forecasts the Air Quality Index (AQI) in Buffalo City, utilizing historical air quality data with a focus on key pollutants, including particulate matter and carbon monoxide concentrations.
+
+### Loading the necessary libraries:
+
+```{r}
+library(readr)        # For reading the CSV file
+library(tsibble)      # For handling time series data
+library(dplyr)        # For data manipulation
+library(ggplot2)      # For data visualization
+library(forecast)     # For ARIMA and forecasting functions
+library(tseries)      # For the ADF test
+library(lubridate) 
+library(vars)
+library(corrplot)
+```
+
+## Dataset Overview:
+
+-   The dataset is downloaded from the United States Environmental Protection Agency's official website - <https://www.epa.gov/outdoor-air-quality-data/download-daily-data>.
+
+-   Data is available for years from 1980 to 2023, and a wide range of pollutants to choose from.
+
+```{r}
+#| label: Dataset Summary
+#| fig-cap: "Summary of the Air Quality Dataset for the year 2023."
+#| warning: false
+#| 
+air_data <- read.csv("aq_dataset.csv")
+summary(air_data)
+
+
+```
+
+## Data Pre-processing:
+
+-   Eliminated rows with missing values across all variables, ensuring a complete dataset for analysis.
+
+-   Checked for remaining missing values in key variables.
+
+-   Ensured all critical fields were fully populated for accurate modeling.
+
+```{r}
+air_data$Date <- as.Date(air_data$Date, format = "%Y-%m-%d")
+
+air_data <- na.omit(air_data)
+
+# Check for NA values in the key variables
+sum(is.na(air_data$`Coconcentration`))
+
+sum(is.na(air_data$Date))
+
+sum(is.na(air_data$DAILY_AQI_VALUE))
+
+```
+
+## Empirical Data Analysis:
+
+All the below data analysis were performed:
+
+-   Correlation HeatMap.
+-   Time Plots of Target variable and the covariate.
+-   Outliers Detection (BoxPlots).
+-   Scatter Plot (CO concentration Vs Air Quality Index).
+-   ACF and PACF plots.
+-   Seasonal and Trend Decomposition.
+
+## 
+
+```{r}
+#| label: HeatMap
+#| fig-cap: "Correlation HeatMap."
+#| warning: false
+air_data <- air_data[, sapply(air_data, function(x) length(unique(na.omit(x))) > 1)]
+
+# Convert factors to numeric if necessary
+numeric_columns <- sapply(air_data, is.numeric)
+air_data_numeric <- air_data[, numeric_columns]
+
+# Compute the correlation matrix
+correlation_matrix <- cor(air_data_numeric, use = "pairwise.complete.obs") # Handle missing values pairwise
+
+# Plot the heatmap
+corrplot(correlation_matrix, method = "color", type = "upper", order = "hclust", 
+         addCoef.col = "black", # Add correlation coefficients on the heatmap
+         tl.col = "black", tl.srt = 45) # Text label color and rotation
+          
+```
+
+## HeatMap Observations:
+
+-   Correlation Values: Darker blue circles represent stronger positive correlations, where one variable increases as the other does. No circles or smaller circles indicate a weaker or no correlation.
+
+-   Key Relationships: The variable "CO concentration" seems to have a strong positive correlation with "DAILY_AQI_VALUE," which is consistent with our analysis of the scatter plot.
+
+-   Data Integrity: Variables like "PERCENT_COMPLETE" might relate to the completeness of data records, although the specific nature of the correlation with other variables isn't clear from this graph.
+
+## 
+
+```{r}
+#| label: Timeplot1
+#| fig-cap: "Time Plot of Carbon Monoxide Concentration."
+#| warning: false
+
+ggplot(air_data, aes(x = Date, y = Coconcentration)) + 
+    geom_line() + 
+    labs(title = "Time Series Plot of CO concentration")
+```
+
+## Time Plots Observations:
+
+-   Seasonal Variation: The plot suggests possible seasonal variation in CO levels, with peaks that might correspond to particular times of the year when CO emissions increase due to factors such as heating during colder months.
+-   Daily Fluctuations: There is considerable day-to-day volatility in CO concentration levels, with several extreme spikes indicating episodic high pollution events, possibly linked to specific environmental or human activities.
+-   Baseline Levels: Aside from the prominent spikes, there is a somewhat consistent baseline CO concentration level, with values often returning to a range between approximately 0.25 to 0.5.
+-   This suggests a regular emission source that is constant over time, punctuated by irregular high emission events.
+
+## 
+
+```{r}
+#| label: Timeplot2
+#| fig-cap: "Time Plot of Air Quality Index."
+#| warning: false
+
+ggplot(air_data, aes(x = Date, y = DAILY_AQI_VALUE)) + 
+    geom_line() + 
+    labs(title = "Time Series Plot of Air Quality Index")
+
+```
+
+## Time Plots Observations:
+
+-   Volatile Indicator: The Air Quality Indicator is highly volatile, with many sharp peaks and troughs.
+-   It suggests frequent changes in air quality, with certain days experiencing significantly poorer air quality.
+-   Extreme Values: There are several notable extreme values, particularly high peaks, which could indicate days with very poor air quality.
+-   These may correspond to specific events or conditions that dramatically worsen air quality.
+-   Baseline Fluctuation: The baseline level of the Air Quality Indicator seems to vary between 5 to around 15 for the most part.
+-   However, this is interrupted by the spikes, suggesting that while the air quality does have a general range it fluctuates within, there are numerous instances where it deviates significantly from this range.
+
+## 
+
+```{r}
+#| label: Outliers
+#| fig-cap: "BoxPlots of CO Concentration and AQI Index."
+#| warning: false
+
+par(mfrow = c(1, 2))
+boxplot(air_data$Coconcentration, main="Box Plot of CO concentration", ylab="Values")
+boxplot(air_data$DAILY_AQI_VALUE, main="Box Plot of Daily AQI Index", ylab="Values")
+par(mfrow = c(1, 1))
+```
+
+## BoxPlots Observations:
+
+-   Median: The line within the box indicates the median CO concentration, which appears to be just above 0.3 and Daily AQI is around 5.
+
+-   Interquartile Range (IQR): The box represents the middle 50% of the data, known as the interquartile range. It's relatively narrow, suggesting that the middle 50% of readings are not spread out over a wide range of values.
+
+-   Outliers: Outliers in both CO concentration and AQI values suggest sporadic days with unusually high pollution levels, indicating episodes of significantly poor air quality.
+
+-   The box plots indicate that while daily AQI values and CO concentrations generally hover around a stable median, there are exceptional days with high AQI and CO readings, raising concerns for air quality and public health.
+
+## 
+
+```{r}
+#| label: Scatter Plot
+#| fig-cap: "Scatter Plot of CO Concentration and AQI value."
+#| warning: false
+
+plot(air_data$Coconcentration, air_data$DAILY_AQI_VALUE, 
+     main = "Scatter Plot of CO Concentration vs. Daily AQI Value",
+     xlab = "CO Concentration",
+     ylab = "Daily AQI Value",
+     pch = 19, col = "blue")
+```
+
+## ScatterPlot Observations:
+
+-   Positive Correlation: CO concentration levels and Daily AQI values show a direct, positive relationship.
+
+-   Increased Rate: The rate of increase in AQI values is greater at higher CO concentrations.
+
+-   Data Clustering: Most data points are concentrated at lower CO levels, with significant AQI variations at higher CO levels.
+
+## 
+
+```{r}
+#| label: ACF & PACF of AQI
+#| fig-cap: "ACF and PACF Plots of Air Quality Index."
+#| warning: false
+
+
+par(mfrow = c(1, 2))
+acf(air_data$DAILY_AQI_VALUE)
+pacf(air_data$DAILY_AQI_VALUE)
+par(mfrow = c(1, 1))
+```
+
+## 
+
+### ACF Analysis:
+
+-   High autocorrelation at lag 0 with a sharp initial decline.
+-   Subsequent lags within confidence bounds, indicating no significant autocorrelation.
+-   Suggests AQI values do not depend on past values; forecasting models might be less effective.
+
+### PACF Analysis:
+
+-   Strong initial partial auto correlation at lag 0.
+-   No significant partial auto correlations beyond lag 0.
+-   Implies limited autoregressive behavior; AR models may not be useful beyond the first lag.
+
+## 
+
+```{r}
+#| label: ACF & PACF of CO
+#| fig-cap: "ACF and PACF Plots of CO Concentration."
+#| warning: false
+
+par(mfrow = c(1, 2))
+acf(air_data$Coconcentration)
+pacf(air_data$Coconcentration)
+par(mfrow = c(1, 1))
+
+```
+
+## 
+
+### ACF Analysis:
+
+-   High initial autocorrelation at lag 0.
+-   Sharp decline after lag 0, indicating minimal autocorrelation.
+-   Values within confidence bounds suggest no significant autocorrelation.
+
+### PACF Analysis:
+
+-   Dominant initial partial autocorrelation at lag 0.
+-   Rapid decline in PACF values, with no significant lags beyond 0.
+-   Implies little autoregressive behavior for predictive modeling.
+
+## 
+
+```{r}
+#| label: STL DEcomposition
+#| fig-cap: "Seasonal and Trend Decomposition of AQI Value."
+#| warning: false
+
+air_data_ts_var1 <- ts(air_data$DAILY_AQI_VALUE, frequency = 12)
+stl_decomp <- stl(air_data_ts_var1, s.window = "periodic")
+autoplot(stl_decomp)
+
+```
+
+## 
+
+### STL Decomposition of AQI Value:
+
+-   Data: Fluctuating Daily AQI Value time series.
+
+-   Trend: Shows a cyclical pattern with no clear directional trend.
+
+-   Seasonal: Regular, repeating patterns in the series.
+
+-   Remainder: Residual random variation after detrending and deseasonalizing
+
+-   The analysis suggests that the Daily AQI Value is influenced by a repeating seasonal pattern, while the trend component does not show a clear increase or decrease over the period represented on the x-axis. The remainder component indicates the presence of random noise and possibly outliers or unusual events affecting air quality.
+
+## 
+
+```{r}
+#| fig-cap: "Seasonal and Trend Decomposition of CO Concentration."
+#| warning: false
+
+air_data_ts_var2 <- ts(air_data$Coconcentration, frequency = 12)
+stl_decomp <- stl(air_data_ts_var2, s.window = "periodic")
+autoplot(stl_decomp)
+```
+
+## 
+
+### STL Decomposition of CO Concentration:
+
+-   Data: Shows observed CO concentration variability and spikes.
+
+-   Trend: Undulating pattern without clear long-term change, suggesting a stable trend.
+
+-   Seasonal: Subtle seasonal effects with small amplitude, indicating minor seasonal impact.
+
+-   Remainder: Volatile residuals highlight irregular fluctuations or external impacts on CO levels.
+
+-   The decomposition suggests that while there might be a slight seasonal pattern, the CO concentration data's volatility is captured more in the irregular remainder component than in the seasonal component. The trend doesn't show a strong long-term directional movement over the period analyzed.
+
+## Augmented Dickey-Fuller Test
+
+```{r}
+#| label: ADF Test
+#| warning: false
+
+adf_result_var1 <- adf.test(air_data_ts_var1)
+print(adf_result_var1)
+```
+
+```{r}
+adf_result_var2 <- adf.test(air_data_ts_var2)
+print(adf_result_var2)
+
+```
+
+## Modelling
+
+The below are the 2 forecasting models used for the Air Quality Index Forecasting:
+
+-   RegARIMA Model:
+
+    -   Combines linear regression with ARIMA: Integrates linear regression with ARIMA, incorporating external regressors into time series forecasting.
+
+    -   Suitable for forecasting with external predictors: Ideal for forecasting a target time series influenced by external variables, enhancing forecast accuracy by capturing additional information.
+
+-   VAR model:
+
+    -   Models interdependencies among time series: Captures linear interdependencies among multiple time series variables, enabling analysis of complex relationships.
+
+    -   Facilitates impulse response analysis: Allows examination of how one variable affects another over time, providing insights into dynamic interactions between variables for decision-making.
+
+## RegARIMA Model
+
+The RegARIMA model combines regression analysis with ARIMA to analyze time series data with external regressors.
+
+### Notation:
+
+-   $y_t$: Target time series variable at time $t$.
+-   $x_t$: External regressor (covariate) at time $t$.
+-   $p, d, q$: ARIMA model parameters, where $p$ is the autoregressive order, $d$ is the degree of differencing, and $q$ is the moving average order.
+
+### Mathematical Background:
+
+The model is given by:
+
+$$y_t' = \beta x_t + ARIMA(p, d, q)$$
+
+Where $y_t'$ is the differenced series if $d > 0$, $\beta$ represents the coefficients of the external regressor $x_t$, and the ARIMA component captures the autocorrelation within the residuals.
+
+## 
+
+### Equation:
+
+air_data_ts_var1 = -0.2511 + 0.1756 \* L12(air_data_ts_var1) + 11.9372 \* air_data_ts_var2
+
+### Annotations:
+
+air_data_ts_var1: Dependent variable representing the time series data.
+
+air_data_ts_var2: Exogenous variable.
+
+-0.2511: Intercept term.
+
+0.1756: Coefficient for the lagged value of the time series (seasonal lag of 12).
+
+11.9372: Coefficient for the exogenous variable.
+
+This equation indicates that the predicted value at time t is a linear combination of an intercept term (-0.2511), the value of the time series lagged by 12 months (seasonal AR term with coefficient 0.1756), and the value of the exogenous variable at time t (with coefficient 11.9372).
+
+## 
+
+### Summary of regARIMA Model
+
+```{r}
+final_model <- auto.arima(y = air_data_ts_var1, xreg = air_data_ts_var2)
+summary(final_model)
+
+```
+
+## 
+
+```{r}
+#| label: residuals
+#| fig-cap: "Residual of regARIMA Model"
+#| warning: false
+
+checkresiduals(final_model)
+```
+
+## 
+
+```{r}
+#| label: Forecasting  Values using regARIMA
+#| warning: false
+
+forecast_values <- forecast(final_model, xreg = air_data_ts_var2, h = 1)
+
+single_forecast <- as.numeric(forecast_values$mean[1])
+
+cat("Next predicted value is", single_forecast, "\n")
+
+```
+
+### regARIMA Observations:
+
+-   Residuals Analysis: Fluctuations around zero, suggesting a good model fit.
+-   ACF of Residuals: Most within confidence bounds, indicating randomness and a good fit.
+-   Residuals Distribution: Histogram with normal distribution density plot, signifying a good ARIMA model fit.
+-   Model Diagnostic: ARIMA(2,1,3)(1,0,0)\[12\] shows no patterns in residuals, implying effective capture of time series structure.
+-   Model Fit: Indicated by non-significant Ljung-Box test and low ACF1, suggesting residuals are white noise.
+-   Coefficient Significance: Significant autoregressive and moving average terms, showing a strong model influence.
+-   Error Metrics: Low RMSE, MAE, and MASE under one, indicating satisfactory predictive performance.
+
+## 
+
+```{r}
+autoplot(forecast_values)
+```
+
+## VAR Model
+
+The VAR model is used for multiple time series to capture their linear interdependencies.
+
+### Notation:
+
+-   $y_t$: Vector of endogenous variables at time $t$.
+-   $p$: Optimal lag length.
+-   $\Phi_i$: Coefficient matrices for lag $i$.
+
+### Mathematical Background:
+
+A VAR(p) model is:
+
+$$y_t = \Phi_1 y_{t-1} + \Phi_2 y_{t-2} + \cdots + \Phi_p y_{t-p} + \epsilon_t$$
+
+with $y_t$ as the endogenous variables vector, $\Phi_i$ as coefficient matrices, and $\epsilon_t$ as the error terms vector.
+
+### Code Context:
+
+-   `final_model` fits a RegARIMA model with `air_data_ts_var1` as the target and `air_data_ts_var2` as the regressor.
+-   `var_model` applies a VAR model to both `air_data_ts_var1` and `air_data_ts_var2`, choosing the lag order based on AIC from `VARselect`.
+
+## Summary of VAR Model
+
+```{r}
+
+air_data_combined <- cbind(air_data_ts_var1, air_data_ts_var2)
+lag_selection <- VARselect(air_data_combined, type = "const")
+optimal_lag <- lag_selection$selection["AIC(n)"]
+var_model <- VAR(y = air_data_combined, p = optimal_lag, type = "const")
+
+summary(var_model)
+```
+
+## 
+
+```{r}
+#| label: residual
+#| fig-cap: "Residual of VAR Model"
+#| warning: false
+
+serial.test(var_model)
+plot(residuals(var_model))
+```
+
+## 
+
+```{r}
+#| label: Forecasting  Values using VAR
+#| warning: false
+
+forecast_val <- forecast(var_model, h = 1)
+single_forecast <- forecast_val$forecast$air_data_ts_var1$mean
+cat("Forecasted value for next month (VAR):", single_forecast)
+
+```
+
+### VAR Model Insights:
+
+-   Significant Lags: VAR model shows key lagged interactions at first and second lags, highlighting a dynamic relationship between variables.
+
+-   Model Fit: Strong fit evident from F-statistic's p-value (\< 2.2e-16) and moderate R-squared values (0.2922 for var1, 0.3144 for var2), indicating a good proportion of variability explained.
+
+-   Residual Independence: Portmanteau test p-value at 0.1139 suggests residuals are independent at 10% significance, with visual and statistical analysis confirming a linear association between series residuals.
+
+## 
+
+```{r}
+autoplot(forecast_val)
+```
+
+## Cross Validation of regArima Model:
+
+```{r}
+n <- length(air_data_ts_var1)
+initial_window <- 100  
+horizon <- 1           
+n_folds <- n - initial_window - horizon + 1
+
+rmse_values_arima <- numeric(n_folds)
+
+for(i in 1:n_folds) {
+  train_set <- air_data_ts_var1[1:(initial_window + i - 1)]
+  test_set <- air_data_ts_var1[(initial_window + i):(initial_window + i + horizon - 1)]
+  
+  fit_arima <- auto.arima(train_set)
+  
+  forecast_arima <- forecast(fit_arima, h = horizon)
+  predicted_arima <- forecast_arima$mean
+  
+  rmse_values_arima[i] <- sqrt(mean((predicted_arima - test_set)^2))
+}
+average_rmse_arima <- mean(rmse_values_arima)
+cat("Average RMSE for RegARIMA model:", average_rmse_arima, "\n")
+```
+
+## Cross Validation observations:
+
+-   Initial Window and Horizon: It starts with an initial training dataset size (initial_window) and makes forecasts one step ahead (horizon = 1).
+
+-   Rolling Forecast: In each iteration (or fold), the training set includes one more observation than in the previous iteration, while the forecast is always made for the next time step. This is a "rolling" approach since the window moves forward by one observation each time.
+
+-   Model Fitting and Forecasting: For each iteration, an ARIMA model is automatically fitted to the current training set using auto.arima(), which selects the best-fitting ARIMA model based on information criteria. A forecast is then made for the next time step.
+
+-   Error Calculation: The RMSE is calculated for the forecast against the actual observation for the next time step. This process is repeated for each fold, and an average RMSE is computed across all folds to assess the model's overall predictive accuracy.
+
+## Cross Validation of VAR Model:
+
+```{r}
+train_data <- air_data_combined[1 : floor(0.8 * nrow(air_data_combined)), ]  
+test_data <- air_data_combined[(floor(0.8 * nrow(air_data_combined)) + 1) : nrow(air_data_combined), ]
+
+p_order <- optimal_lag  
+model_var <- VAR(ts(train_data), p = p_order,type="const")
+
+```
+
+```{r}
+forecast_no = 29
+forecast_var <- predict(var_model, n.ahead = forecast_no)
+predicted_values <- forecast_var$fcst$air_data_ts_var1[, "fcst"]
+predicted_values
+head(test_data)
+actual_values <- head(test_data[0], forecast_no)
+if (length(predicted_values) == length(actual_values)) {
+  rmse_var <- mean(abs(predicted_values - actual_values), na.rm = TRUE)
+  print(paste("RMSE for VAR:", rmse_var))
+} else {
+  print("The lengths of predicted and actual values do not match.")
+}
+```
+
+## 
+
+```{r}
+forecast_no = 29
+predicted_values <- forecast_var$fcst$air_data_ts_var1[, "fcst"]
+predicted_values <- predicted_values[0:29]
+# Make sure 'forecast_no' does not exceed the length of 'test_data'
+available_test_points <- nrow(test_data)
+if (forecast_no > available_test_points) {
+  cat("Warning: forecast_no exceeds the available number of points in test_data. Adjusting to", available_test_points, "\n")
+  forecast_no <- available_test_points
+}
+# Extract the actual values for the comparison, ensuring the length matches 'forecast_no'
+actual_values <- test_data[, 1][1:forecast_no]
+# Print lengths for debugging
+cat("Length of predicted values:", length(predicted_values), "\n")
+cat("Length of actual values:", length(actual_values), "\n")
+if (length(predicted_values) == length(actual_values)) {
+  r <- sqrt(mean((predicted_values - actual_values)^2, na.rm = TRUE))
+  print(paste("RMSE for VAR:", r))
+} else {
+  print("Adjusted lengths of predicted and actual values still do not match.")
+}
+```
+
+## Conclusions and Future Scope:
+
+-   Error Calculation: The RMSE is calculated for the forecast against the actual observation using the VAR model is 3.06827 and using the regARIMA is 1.77
+
+-   As we can see RMSE of regArima is less than the RMSE of VAR so regArima is a better model for this dataset.
+
+-   Integration of Additional Data Sources: Incorporate diverse data like satellite imagery, weather forecasts, and traffic patterns to enhance air quality forecasts, improving accuracy and reliability.
+
+-   Real-Time Monitoring and Feedback: Develop systems for real-time air quality monitoring and feedback through mobile apps or web-based dashboards, enabling stakeholders to make timely decisions and interventions.
+
+-   Health Impact Assessment: Integrate air quality forecasts with health impact assessment models to quantify the health effects of pollution, aiding healthcare professionals and policymakers in implementing targeted interventions to mitigate risks.
